@@ -85,9 +85,17 @@ typedef struct
 } DESC_CHUNK ;
 
 typedef struct
+{	uint32_t	stringID ;
+	int64_t		stringByteOffset ;
+	char*		string;
+} CAF_STRING ;
+
+typedef struct
 {	int			chanmap_tag ;
 
 	ALAC_DECODER_INFO	alac ;
+	int32_t		num_strings;
+	CAF_STRING 	*strings ;
 } CAF_PRIVATE ;
 
 /*------------------------------------------------------------------------------
@@ -220,11 +228,21 @@ caf_open (SF_PRIVATE *psf)
 
 static int
 caf_close (SF_PRIVATE *psf)
-{
+{	CAF_PRIVATE	*pcaf ;
+
+	if ((pcaf = psf->container_data) == NULL)
+		return SFE_INTERNAL ;
+
 	if (psf->file.mode == SFM_WRITE || psf->file.mode == SFM_RDWR)
 	{	caf_write_tailer (psf) ;
 		caf_write_header (psf, SF_TRUE) ;
 		} ;
+
+		for (int32_t n = 0; n < pcaf->num_strings; n++)
+		{
+			free(pcaf->strings[n].string);
+			}
+		free(pcaf->strings);
 
 	return 0 ;
 } /* caf_close */
@@ -343,6 +361,7 @@ caf_read_header (SF_PRIVATE *psf)
 	BUF_UNION	ubuf ;
 	DESC_CHUNK desc ;
 	sf_count_t chunk_size ;
+	uint32_t bytesread, mark_count = 0 ;
 	double srate ;
 	short version, flags ;
 	int marker, k, have_data = 0, error ;
@@ -350,6 +369,7 @@ caf_read_header (SF_PRIVATE *psf)
 	if ((pcaf = psf->container_data) == NULL)
 		return SFE_INTERNAL ;
 
+	pcaf->num_strings = 0 ;
 	memset (&desc, 0, sizeof (desc)) ;
 
 	/* Set position to start of file to begin reading header. */
@@ -532,6 +552,92 @@ caf_read_header (SF_PRIVATE *psf)
 				caf_read_strings (psf, chunk_size) ;
 				break ;
 
+			case strg_MARKER:
+			psf_log_printf (psf, " %M : %d\n", marker, chunk_size) ;
+			{	uint32_t n = 0, newstring_count = 0 ;
+				uint16_t mark_id;
+
+				bytesread = 0;
+				bytesread += psf_binheader_readf (psf, "E4", &n) ;
+				newstring_count = n;
+				pcaf->num_strings = pcaf->num_strings + newstring_count;
+
+				if (pcaf->strings != NULL)
+				{	psf_log_printf (psf, "*** Additional STRG chunk found. Using realloc.\n") ;
+					realloc(pcaf->strings, pcaf->num_strings*sizeof(CAF_STRING));
+					memset(&pcaf->strings[pcaf->num_strings-newstring_count], 0, n*sizeof(CAF_STRING));
+					}
+				else
+				{
+					pcaf->strings = calloc(pcaf->num_strings, sizeof(CAF_STRING));
+					}
+
+				// parse the stringsIDs
+				for (n = pcaf->num_strings-newstring_count ; n < pcaf->num_strings; n++)
+				{
+					uint32_t stringid;
+					int64_t stringByteOffset;
+					bytesread += psf_binheader_readf (psf, "E48", &stringid, &stringByteOffset) ;
+					pcaf->strings[n].stringID = stringid;
+					pcaf->strings[n].stringByteOffset = stringByteOffset;
+					}
+
+				// read the remaining chunk
+				char buf[chunk_size-bytesread];
+				psf_binheader_readf (psf, "Eb", &buf, chunk_size-bytesread) ; // (no support for strings in psf_binheader_readf)
+
+				// parse the actual strings
+				for (n = pcaf->num_strings-newstring_count ; n < pcaf->num_strings; n++)
+				{
+					// read the rest of the buffer...!
+					uint32_t stringlength = strlen(&buf[pcaf->strings[n].stringByteOffset]);
+					pcaf->strings[n].string = (char*)malloc((stringlength+1)*sizeof(char)); // malloc char
+					memcpy(pcaf->strings[n].string, &buf[pcaf->strings[n].stringByteOffset], (stringlength+1)*sizeof(char));
+					}
+
+				}
+			break;
+
+			case mark_MARKER :
+			psf_log_printf (psf, " %M : %d\n", marker, chunk_size) ;
+			{	uint16_t mark_id, pstringIdx ;
+				uint32_t n = 0, m = 0, k = 0, smpte_timetype, position;
+				double position_d;
+
+				bytesread = psf_binheader_readf (psf, "E44", &smpte_timetype, &n) ;
+				mark_count = n ;
+				psf_log_printf (psf, "  Count : %u\n", mark_count) ;
+
+				if (mark_count > 1000)
+				{	psf_log_printf (psf, "  More than 1000 markers, skipping!\n") ;
+					psf_binheader_readf (psf, "j", chunk_size - bytesread) ;
+					break ;
+				} ;
+
+				if ((psf->cues = psf_cues_alloc (mark_count)) == NULL)
+					return SFE_MALLOC_FAILED ;
+
+				for (n = 0 ; n < mark_count && bytesread < chunk_size ; n++)
+				{	uint32_t type, channel ;
+
+					bytesread += psf_binheader_readf (psf, "E4d4", &type, &position_d, &mark_id);
+					position = (uint32_t)position_d;
+					bytesread += psf_binheader_readf (psf, "j", 8) ; // jump over the CAF_SMPTE_Time
+					bytesread += psf_binheader_readf (psf, "E4", &channel);
+					psf_log_printf (psf, "   Mark ID  : %u\n   Position : %u\n", mark_id, position) ;
+
+					psf->cues->cue_points [n].indx = mark_id ;
+					psf->cues->cue_points [n].position = 0 ;
+					psf->cues->cue_points [n].fcc_chunk = MAKE_MARKER ('d', 'a', 't', 'a') ; /* always data */
+					psf->cues->cue_points [n].chunk_start = 0 ;
+					psf->cues->cue_points [n].block_start = 0 ;
+					psf->cues->cue_points [n].sample_offset = position ;
+					} ;
+
+				} ;
+			psf_binheader_readf (psf, "j", chunk_size - bytesread) ;
+			break ;
+
 			default :
 				psf_log_printf (psf, "%M : %D (skipped)\n", marker, chunk_size) ;
 				psf_binheader_readf (psf, "j", make_size_t (chunk_size)) ;
@@ -547,6 +653,24 @@ caf_read_header (SF_PRIVATE *psf)
 		if (psf_ftell (psf) >= psf->filelength - SIGNED_SIZEOF (chunk_size))
 		{	psf_log_printf (psf, "End\n") ;
 			break ;
+			} ;
+		} ;
+
+	/* The marker names are stored in the strings chunk */
+	/* Check for existing strings */
+	for (uint32_t n = 0 ; n < mark_count ; n++)
+	{
+		for (uint32_t m=0; m < pcaf->num_strings; m++)
+		{
+			if (pcaf->strings[m].stringID == psf->cues->cue_points [n].indx)
+			{
+				// found a matching stringID
+				uint32_t str_len = strlen(pcaf->strings[m].string);
+				for (k = 0; k < str_len; k++)
+				{
+					psf->cues->cue_points [n].name[k] = pcaf->strings[m].string[k];
+					} ;
+				} ;
 			} ;
 		} ;
 
@@ -731,6 +855,55 @@ caf_write_header (SF_PRIVATE *psf, int calc_length)
 
 	if (psf->channel_map && pcaf->chanmap_tag)
 		psf_binheader_writef (psf, "Em8444", chan_MARKER, (sf_count_t) 12, pcaf->chanmap_tag, 0, 0) ;
+
+	/* Write strings chunk used for naming markers */
+	if (psf->cues != NULL)
+	{	/* There are cues */
+
+		uint32_t totalStringLength = 0, stringLength = 0, idx, ps;
+		int64_t stringsByteOffset = 0;
+
+		// first count the total length of all strings
+		for (idx = 0 ; idx < psf->cues->cue_count ; idx++)
+		{	totalStringLength += (strlen (psf->cues->cue_points [idx].name) + 1) ; /* Add Nullterminator */
+			} ;
+
+		psf_binheader_writef (psf, "Em84",
+			strg_MARKER, 4+psf->cues->cue_count*(4+8)+totalStringLength, psf->cues->cue_count) ; // size: chunk header, StringIDs, chars
+
+		// write mStringsIDs
+		for (idx = 0 ; idx < psf->cues->cue_count ; idx++)
+		{	psf_binheader_writef (psf, "E48",
+				psf->cues->cue_points [idx].indx, stringsByteOffset) ;
+				stringsByteOffset += strlen (psf->cues->cue_points [idx].name) + 1;
+			} ;
+
+		// write mStrings
+		for (idx = 0 ; idx < psf->cues->cue_count ; idx++)
+		{	stringLength = strlen (psf->cues->cue_points [idx].name) ;
+			char textString [stringLength + 1] ;
+			for (ps = 0 ; ps < stringLength ; ps++)
+				textString [ps] = psf->cues->cue_points [idx].name [ps] ;
+			textString [stringLength] = '\0' ;
+
+			psf_binheader_writef (psf, "Eb", textString, sizeof (textString)) ;
+			} ;
+
+		}
+
+	/* Write marker chunk */
+	if (psf->cues != NULL)
+	{	/* There are cues */
+		uint32_t idx ;
+
+		psf_binheader_writef (psf, "Em844",
+			mark_MARKER, 4+4+psf->cues->cue_count*28, 0, psf->cues->cue_count) ;
+
+		for (idx = 0 ; idx < psf->cues->cue_count ; idx++)
+		{	psf_binheader_writef (psf, "E4d4444", 0, (double)psf->cues->cue_points [idx].sample_offset, psf->cues->cue_points [idx].indx, 0, 0, 0 ) ;
+
+			} ;
+		} ;
 
 	/* Write custom headers. */
 	for (uk = 0 ; uk < psf->wchunks.used ; uk++)
