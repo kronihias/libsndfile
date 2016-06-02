@@ -146,6 +146,7 @@ main (int argc, char *argv [])
 	if (do_all || strcmp (argv [1], "cue") == 0)
 	{	cue_test ("cue.wav", SF_FORMAT_WAV | SF_FORMAT_PCM_16) ;
 		cue_test ("cue.aiff" , SF_FORMAT_AIFF | SF_FORMAT_PCM_24) ;
+		cue_test ("cue.caf" , SF_FORMAT_CAF | SF_FORMAT_PCM_24) ;
 		test_count ++ ;
 		} ;
 
