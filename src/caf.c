@@ -561,6 +561,7 @@ caf_read_header (SF_PRIVATE *psf)
 				bytesread += psf_binheader_readf (psf, "E4", &n) ;
 				newstring_count = n;
 				pcaf->num_strings = pcaf->num_strings + newstring_count;
+				psf_log_printf (psf, "  Count : %u\n", newstring_count) ;
 
 				if (pcaf->strings != NULL)
 				{	psf_log_printf (psf, "*** Additional STRG chunk found. Using realloc.\n") ;
@@ -593,6 +594,7 @@ caf_read_header (SF_PRIVATE *psf)
 					uint32_t stringlength = strlen(&buf[pcaf->strings[n].stringByteOffset]);
 					pcaf->strings[n].string = (char*)malloc((stringlength+1)*sizeof(char)); // malloc char
 					memcpy(pcaf->strings[n].string, &buf[pcaf->strings[n].stringByteOffset], (stringlength+1)*sizeof(char));
+					psf_log_printf (psf, "   StringID    : %d\n   Byte Offset : %d\n   String      : %s\n", pcaf->strings[n].stringID, pcaf->strings[n].stringByteOffset, pcaf->strings[n].string) ;
 					}
 
 				}
