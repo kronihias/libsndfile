@@ -565,7 +565,7 @@ caf_read_header (SF_PRIVATE *psf)
 
 				if (pcaf->strings != NULL)
 				{	psf_log_printf (psf, "*** Additional STRG chunk found. Using realloc.\n") ;
-					realloc(pcaf->strings, pcaf->num_strings*sizeof(CAF_STRING));
+					pcaf->strings = realloc(pcaf->strings, pcaf->num_strings*sizeof(CAF_STRING));
 					memset(&pcaf->strings[pcaf->num_strings-newstring_count], 0, n*sizeof(CAF_STRING));
 					}
 				else
