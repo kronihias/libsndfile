@@ -14,8 +14,15 @@ You can grab the source code using:
 
     $ git clone git://github.com/erikd/libsndfile.git
 
-Building on Linux, OSX and Windows (Using GNU GCC) will require a number of GNU
-and other Free and Open Source Software tools including:
+For building for Android see [BuildingForAndroid][BuildingForAndroid].
+
+There are currently two build systems; the official GNU autotool based one and
+a more limited and experimental CMake based build system. Use of the CMake build
+system is documented below.
+
+To build libsndfile on Linux, OSX and Windows (Using GNU GCC) from a git clone
+using the autotools based build system will require a number of GNU and other
+Free and Open Source Software tools including:
 
 * [Autoconf][autoconf]
 * [Autogen][autogen]
@@ -53,6 +60,18 @@ Finally libsndfile can be built and tested:
     $ make
     $ make check
 
+
+## The CMake build system.
+
+The CMake build system is still experimental and probably only works on linux
+because it still relies on GNU autotools for bootstrapping. Using it as simple
+as:
+
+    $ Scripts/cmake-build.sh
+
+Will happily accept patches to make the CMake build system more portable.
+
+
 ## Submitting Patches.
 
 * Patches should pass all pre-commit hook tests.
@@ -79,3 +98,4 @@ Finally libsndfile can be built and tested:
 [libvorbis]: http://www.vorbis.com/
 [pkgconfig]: http://www.freedesktop.org/wiki/Software/pkg-config
 [python]: http://www.python.org/
+[BuildingForAndroid]: https://github.com/erikd/libsndfile/blob/master/Building-for-Android.md
