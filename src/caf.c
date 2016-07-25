@@ -668,10 +668,7 @@ caf_read_header (SF_PRIVATE *psf)
 			{
 				// found a matching stringID
 				uint32_t str_len = strlen(pcaf->strings[m].string);
-				for (k = 0; k < str_len; k++)
-				{
-					psf->cues->cue_points [n].name[k] = pcaf->strings[m].string[k];
-					} ;
+				memcpy(psf->cues->cue_points [n].name, pcaf->strings[m].string, str_len*sizeof(char));
 				} ;
 			} ;
 		} ;
